@@ -19,12 +19,15 @@ func sendFile(name string, rw *bufio.ReadWriter) error {
 	if errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("File does not exists: %w", err)
 	} else if err != nil {
-		return err
+		return fmt.Errorf("Error opening file: %w", err)
 	}
 	defer file.Close()
 
 	// write the header: just filename for now
-	rw.WriteString(strings.TrimSpace(name) + "\n")
+	_, err = rw.WriteString(strings.TrimSpace(name) + "\n")
+	if err != nil {
+		return fmt.Errorf("Error writing header to stream: %w", err)
+	}
 
 	// get some info for the file
 	var stat, _ = file.Stat()
@@ -53,7 +56,10 @@ func sendFile(name string, rw *bufio.ReadWriter) error {
 		}
 
 		// SEND IT
-		rw.Write(buffer)
+		_, err = rw.Write(buffer)
+		if err != nil {
+			return fmt.Errorf("Error writing payload to stream: %w", err)
+		}
 		totalBytesSent += len(buffer)
 
 		// reset

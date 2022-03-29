@@ -3,10 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,17 +15,14 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	discovery "github.com/libp2p/go-libp2p-discovery"
+	log "github.com/sirupsen/logrus"
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/multiformats/go-multiaddr"
-
-	"github.com/ipfs/go-log/v2"
 )
 
-var logger = log.Logger("rendezvous")
-
 func handleStream(stream network.Stream) {
-	logger.Info("Got a new stream!")
+	log.Info("Got a new stream!")
 
 	// Create a buffer stream for non blocking read and write.
 	rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
@@ -42,7 +37,7 @@ func readData(rw *bufio.ReadWriter) {
 	for {
 		var fileName, err = rw.ReadString('\n')
 		if err != nil {
-			fmt.Println("Error reading from buffer: ", err)
+			log.Error("Error reading from buffer: ", err)
 			return
 		}
 		if fileName == "" {
@@ -52,10 +47,16 @@ func readData(rw *bufio.ReadWriter) {
 		fileName = strings.TrimSpace(strings.TrimSuffix(fileName, "\n"))
 		f, err := os.Create(filepath.Base(fileName))
 		if err != nil {
+			log.Error("Error creating file: ", err)
+			return
 		}
 		defer f.Close()
 
-		rw.WriteTo(f)
+		_, err = rw.WriteTo(f)
+		if err != nil {
+			log.Error("Error writing file: ", err)
+			return
+		}
 	}
 }
 
@@ -90,27 +91,8 @@ func writeData(rw *bufio.ReadWriter) {
 	}
 }
 
-func streamFile(name string, rw *bufio.ReadWriter) error {
-	var f, err = os.Open(strings.TrimSpace(name))
-	if errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("File does not exists: %w", err)
-	} else if err != nil {
-		return err
-	}
-
-	rw.WriteString(strings.TrimSpace(name) + "\n")
-	_, err = io.Copy(rw, f)
-	if err != nil {
-		return err
-	}
-
-	return f.Close()
-}
-
 func main() {
 
-	log.SetAllLoggers(log.LevelWarn)
-	log.SetLogLevel("rendezvous", "info")
 	help := flag.Bool("h", false, "Display Help")
 	config, err := ParseFlags()
 	if err != nil {
@@ -131,8 +113,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	logger.Info("Host created. We are:", host.ID())
-	logger.Info(host.Addrs())
+	log.Info("Host created. We are:", host.ID())
+	log.Info(host.Addrs())
 
 	// Set a function as stream handler. This function is called when a peer
 	// initiates a connection and starts a stream with this peer.
@@ -150,7 +132,7 @@ func main() {
 
 	// Bootstrap the DHT. In the default configuration, this spawns a Background
 	// thread that will refresh the peer table every five minutes.
-	logger.Debug("Bootstrapping the DHT")
+	log.Debug("Bootstrapping the DHT")
 	if err = kademliaDHT.Bootstrap(ctx); err != nil {
 		panic(err)
 	}
@@ -164,9 +146,9 @@ func main() {
 		go func() {
 			defer wg.Done()
 			if err := host.Connect(ctx, *peerinfo); err != nil {
-				logger.Warning(err)
+				log.Warning(err)
 			} else {
-				logger.Info("Connection established with bootstrap node:", *peerinfo)
+				log.Info("Connection established with bootstrap node:", *peerinfo)
 			}
 		}()
 	}
@@ -174,14 +156,14 @@ func main() {
 
 	// We use a rendezvous point "meet me here" to announce our location.
 	// This is like telling your friends to meet you at the Eiffel Tower.
-	logger.Info("Announcing ourselves...")
+	log.Info("Announcing ourselves...")
 	routingDiscovery := discovery.NewRoutingDiscovery(kademliaDHT)
 	discovery.Advertise(ctx, routingDiscovery, config.RendezvousString)
-	logger.Debug("Successfully announced!")
+	log.Debug("Successfully announced!")
 
 	// Now, look for others who have announced
 	// This is like your friend telling you the location to meet you.
-	logger.Debug("Searching for other peers...")
+	log.Debug("Searching for other peers...")
 	peerChan, err := routingDiscovery.FindPeers(ctx, config.RendezvousString)
 	if err != nil {
 		panic(err)
@@ -191,13 +173,13 @@ func main() {
 		if peer.ID == host.ID() {
 			continue
 		}
-		logger.Debug("Found peer:", peer)
+		log.Debug("Found peer:", peer)
 
-		logger.Debug("Connecting to:", peer)
+		log.Debug("Connecting to:", peer)
 		stream, err := host.NewStream(ctx, peer.ID, protocol.ID(config.ProtocolID))
 
 		if err != nil {
-			logger.Warning("Connection failed:", err)
+			log.Warning("Connection failed:", err)
 			continue
 		} else {
 			rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
@@ -206,7 +188,7 @@ func main() {
 			go readData(rw)
 		}
 
-		logger.Info("Connected to:", peer)
+		log.Info("Connected to:", peer)
 	}
 
 	select {}

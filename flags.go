@@ -28,6 +28,7 @@ func (al *addrList) Set(value string) error {
 	return nil
 }
 
+/*
 func StringsToAddrs(addrStrings []string) (maddrs []maddr.Multiaddr, err error) {
 	for _, addrString := range addrStrings {
 		addr, err := maddr.NewMultiaddr(addrString)
@@ -38,6 +39,7 @@ func StringsToAddrs(addrStrings []string) (maddrs []maddr.Multiaddr, err error) 
 	}
 	return
 }
+*/
 
 type Config struct {
 	RendezvousString string
