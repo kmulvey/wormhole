@@ -12,6 +12,37 @@ import (
 // declare chunk size
 const bufferSize = 1e3
 
+func writeData(rw *bufio.ReadWriter) {
+	var stdReader = bufio.NewReader(os.Stdin)
+
+	for {
+		fmt.Print("path to file > ")
+		fileName, err := stdReader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading from stdin")
+			panic(err)
+		}
+
+		if strings.TrimSpace(fileName) == "" {
+			return
+		}
+
+		//err = streamFile(fileName, rw)
+		err = sendFile(fileName, rw)
+		if err != nil {
+			fmt.Println("Error reading from stdin")
+			panic(err)
+		}
+
+		err = rw.Flush()
+		if err != nil {
+			fmt.Println("Error flushing buffer")
+			panic(err)
+		}
+
+	}
+}
+
 func sendFile(name string, rw *bufio.ReadWriter) error {
 
 	// open file

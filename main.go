@@ -5,12 +5,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 
-	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
@@ -18,85 +14,15 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	"github.com/multiformats/go-multiaddr"
 )
 
-func handleStream(stream network.Stream) {
-	log.Info("Got a new stream!")
-
-	// Create a buffer stream for non blocking read and write.
-	rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
-
-	go readData(rw)
-	go writeData(rw)
-
-	// 'stream' will stay open until you close it (or the other side closes it).
-}
-
-func readData(rw *bufio.ReadWriter) {
-	for {
-		var fileName, err = rw.ReadString('\n')
-		if err != nil {
-			log.Error("Error reading from buffer: ", err)
-			return
-		}
-		if fileName == "" {
-			return
-		}
-
-		fileName = strings.TrimSpace(strings.TrimSuffix(fileName, "\n"))
-		f, err := os.Create(filepath.Base(fileName))
-		if err != nil {
-			log.Error("Error creating file: ", err)
-			return
-		}
-		defer f.Close()
-
-		_, err = rw.WriteTo(f)
-		if err != nil {
-			log.Error("Error writing file: ", err)
-			return
-		}
-	}
-}
-
-func writeData(rw *bufio.ReadWriter) {
-	stdReader := bufio.NewReader(os.Stdin)
-
-	for {
-		fmt.Print("> ")
-		fileName, err := stdReader.ReadString('\n')
-		if err != nil {
-			fmt.Println("Error reading from stdin")
-			panic(err)
-		}
-
-		if strings.TrimSpace(fileName) == "" {
-			return
-		}
-
-		//err = streamFile(fileName, rw)
-		err = sendFile(fileName, rw)
-		if err != nil {
-			fmt.Println("Error reading from stdin")
-			panic(err)
-		}
-
-		err = rw.Flush()
-		if err != nil {
-			fmt.Println("Error flushing buffer")
-			panic(err)
-		}
-
-	}
-}
-
 func main() {
+	var ctx = context.Background()
 
 	help := flag.Bool("h", false, "Display Help")
 	config, err := ParseFlags()
 	if err != nil {
-		panic(err)
+		log.Fatal("Cannot parse cli flags ", err)
 	}
 
 	if *help {
@@ -109,9 +35,9 @@ func main() {
 
 	// libp2p.New constructs a new libp2p Host. Other options can be added
 	// here.
-	host, err := libp2p.New(libp2p.ListenAddrs([]multiaddr.Multiaddr(config.ListenAddresses)...))
+	host, err := makeConn(ctx, config.ListenAddresses)
 	if err != nil {
-		panic(err)
+		log.Fatal("Cannot create host ", err)
 	}
 	log.Info("Host created. We are:", host.ID())
 	log.Info(host.Addrs())
@@ -124,17 +50,16 @@ func main() {
 	// client because we want each peer to maintain its own local copy of the
 	// DHT, so that the bootstrapping node of the DHT can go down without
 	// inhibiting future peer discovery.
-	ctx := context.Background()
 	kademliaDHT, err := dht.New(ctx, host)
 	if err != nil {
-		panic(err)
+		log.Fatal("Cannot create dht ", err)
 	}
 
 	// Bootstrap the DHT. In the default configuration, this spawns a Background
 	// thread that will refresh the peer table every five minutes.
 	log.Debug("Bootstrapping the DHT")
 	if err = kademliaDHT.Bootstrap(ctx); err != nil {
-		panic(err)
+		log.Fatal("Error bootstrapping dht ", err)
 	}
 
 	// Let's connect to the bootstrap nodes first. They will tell us about the
@@ -166,7 +91,7 @@ func main() {
 	log.Debug("Searching for other peers...")
 	peerChan, err := routingDiscovery.FindPeers(ctx, config.RendezvousString)
 	if err != nil {
-		panic(err)
+		log.Fatal("Error finding peers ", err)
 	}
 
 	for peer := range peerChan {
@@ -177,9 +102,8 @@ func main() {
 
 		log.Debug("Connecting to:", peer)
 		stream, err := host.NewStream(ctx, peer.ID, protocol.ID(config.ProtocolID))
-
 		if err != nil {
-			log.Warning("Connection failed:", err)
+			log.Warning("Connection failed: ", err)
 			continue
 		} else {
 			rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
@@ -192,4 +116,16 @@ func main() {
 	}
 
 	select {}
+}
+
+func handleStream(stream network.Stream) {
+	log.Info("Got a new stream!")
+
+	// Create a buffer stream for non blocking read and write.
+	rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
+
+	go readData(rw)
+	go writeData(rw)
+
+	// 'stream' will stay open until you close it (or the other side closes it).
 }
